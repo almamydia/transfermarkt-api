@@ -1,6 +1,8 @@
 import re
 import urllib.request
+import urllib.parse
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 from bs4 import BeautifulSoup
 
 router = APIRouter()
@@ -30,19 +32,16 @@ def search_staff(name: str):
         if not name_text:
             continue
 
-        # Récupérer club et rôle depuis la ligne du tableau
         row = link.find_parent("tr") or link.find_parent("td")
         club, role, photo = "", "", ""
         if row:
             cells = row.find_all("td")
-            if len(cells) > 1:
-                role = cells[1].text.strip() if len(cells) > 1 else ""
-                club = cells[2].text.strip() if len(cells) > 2 else ""
+            role = cells[1].text.strip() if len(cells) > 1 else ""
+            club = cells[2].text.strip() if len(cells) > 2 else ""
             img = row.find("img")
             if img:
                 photo = img.get("src", img.get("data-src", ""))
 
-        # Éviter les doublons
         if any(r["id"] == tm_id for r in results):
             continue
 
@@ -56,13 +55,12 @@ def search_staff(name: str):
             "tm_url": f"{TM_BASE}{href}",
         })
 
-    return {"query": name, "results": results[:10]}
+    return JSONResponse(content={"query": name, "results": results[:10]})
 
 
 @router.get("/{staff_id}/profile")
 def get_staff_profile(staff_id: str):
     """Récupère le profil complet d'un membre du staff."""
-    import urllib.parse
     url = f"{TM_BASE}/staff/profil/trainer/{staff_id}"
     req = urllib.request.Request(url, headers=HEADERS)
     html = urllib.request.urlopen(req, timeout=15).read().decode("utf-8")
@@ -91,12 +89,11 @@ def get_staff_profile(staff_id: str):
                 dob = content.text.strip().split("(")[0].strip()
                 break
 
-    return {
+    return JSONResponse(content={
         "id": staff_id,
         "club": club,
         "nationality": nationality,
         "dob": dob,
         "photo": photo,
         "tm_url": url,
-    }
-import urllib.parse
+    })
