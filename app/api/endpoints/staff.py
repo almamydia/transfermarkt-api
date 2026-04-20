@@ -1,8 +1,8 @@
 import re
 import urllib.request
 import urllib.parse
-from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Query
+from fastapi.responses import JSONResponse, PlainTextResponse
 from bs4 import BeautifulSoup
 
 router = APIRouter()
@@ -14,48 +14,62 @@ HEADERS = {
 }
 
 @router.get("/search/{name}")
-def search_staff(name: str):
-    """Recherche un membre du staff sur Transfermarkt par nom."""
+def search_staff(name: str, format: str = Query(default="json")):
+    """
+    Recherche un membre du staff sur Transfermarkt par nom.
+    format=text → retourne une liste de texte pour Shortcuts
+    format=json → retourne du JSON (défaut)
+    """
     url = f"{TM_BASE}/schnellsuche/ergebnis/schnellsuche?query={urllib.parse.quote(name)}&Typ=trainer"
     req = urllib.request.Request(url, headers=HEADERS)
     html = urllib.request.urlopen(req, timeout=15).read().decode("utf-8")
     soup = BeautifulSoup(html, "html.parser")
 
     results = []
+    seen_ids = set()
+
     for link in soup.select("a[href*='/profil/trainer/']"):
         href = link.get("href", "")
         m = re.search(r"/profil/trainer/(\d+)", href)
         if not m:
             continue
         tm_id = m.group(1)
+        if tm_id in seen_ids:
+            continue
+        seen_ids.add(tm_id)
+
         name_text = link.text.strip()
         if not name_text:
             continue
 
         row = link.find_parent("tr") or link.find_parent("td")
-        club, role, photo = "", "", ""
+        club, role = "", ""
         if row:
             cells = row.find_all("td")
             role = cells[1].text.strip() if len(cells) > 1 else ""
             club = cells[2].text.strip() if len(cells) > 2 else ""
-            img = row.find("img")
-            if img:
-                photo = img.get("src", img.get("data-src", ""))
-
-        if any(r["id"] == tm_id for r in results):
-            continue
 
         results.append({
             "id": tm_id,
             "name": name_text,
             "role": role,
             "club": club,
-            "photo": photo,
             "tmic": f"TMIC:{tm_id}",
-            "tm_url": f"{TM_BASE}{href}",
         })
 
-    return JSONResponse(content={"query": name, "results": results[:10]})
+        if len(results) >= 10:
+            break
+
+    if format == "text":
+        # Format pour Shortcuts : "Nom | Club | Rôle | TMIC:ID"
+        lines = []
+        for r in results:
+            club_str = r["club"] if r["club"] else "—"
+            role_str = r["role"] if r["role"] else "—"
+            lines.append(f"{r['name']} | {club_str} | {role_str} | {r['tmic']}")
+        return PlainTextResponse("\n".join(lines))
+
+    return JSONResponse(content={"query": name, "results": results})
 
 
 @router.get("/{staff_id}/profile")
